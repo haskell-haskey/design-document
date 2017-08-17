@@ -1,0 +1,162 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{bytefield}
+\usepackage{float}
+
+\title{Haskey - Design Document}
+\author{Henri Verroken}
+\date{August 2017}
+
+\setlength{\parskip}{5pt}
+
+\begin{document}
+
+\maketitle
+
+\newcommand{\hex}{\texttt}
+
+\section{Binary format}
+This section describes the on-disk binary format. Figure~\ref{packet:generic-page} shows the binary format of a generic page. The binary format of each page type starts with the Adler-32 checksum of all the data after the checksum field. It is followed by a field that indicates the page type. The binary format of the remaining data is page type specific. The type field can be one of the following values:
+
+\begin{itemize}
+    \item \textbf{Empty (\hex{0x00}):} An empty, unused page. The remaining data is garbage.
+    \item \textbf{Meta (\hex{0x20}):} A meta-page of the database (Section~\ref{sec:binary-format-meta-pages}).
+    \item \textbf{Overflow (\hex{0x40}):} An overflow page, containing overflow data (Section~\ref{sec:binary-format-overflow-pages}).
+    \item \textbf{Leaf node (\hex{0x60}):} A leaf node page, containing actual key-value pairs (Section~\ref{sec:binary-format-leaf-nodes}).
+    \item \textbf{Index node (\hex{0x80}):} An index node page, containing a branch node of the tree (Section~\ref{sec:binary-format-index-nodes}).
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\begin{bytefield}{32}
+  \bitheader{0-31} \\
+  \bitbox{32}{Checksum} \\
+  \bitbox{8}{Type}\bitbox[lrt]{24}{} \\
+  \wordbox[lrb]{3}{Remaining data}
+\end{bytefield}
+\caption{Binary format of a generic page, of a certain type.}
+\label{packet:generic-page}
+\end{figure}
+
+The remaining data in Figure~\ref{packet:generic-page} can be compressed using lz4. In that case Figure~\ref{packet:generic-compressed-page} shows the binary format of a generic packet. The first field is the Adler-32 checksum of all (partially compressed) data after the checksum field. The type field indicates the page type, which is \texttt{OR}ed with \hex{0x01} to indicate that the page contents are compressed. The data is compressed using the \texttt{lz4} library.
+
+\begin{figure}[H]
+\centering
+\begin{bytefield}{32}
+  \bitheader{0-31} \\
+  \bitbox{32}{Checksum} \\
+  \bitbox{8}{Type \texttt{OR} \hex{0x1}}\bitbox[lrt]{24}{} \\
+  \wordbox[lrb]{3}{Compressed remaining data}
+\end{bytefield}
+\caption{Binary format of a generic page with compressed data, of a certain type.}
+\label{packet:generic-compressed-page}
+\end{figure}
+
+
+\subsection{Meta pages}\label{sec:binary-format-meta-pages}
+A meta-page is used to store meta-data about the database. Figure~\ref{packet:meta-page} shows the binary format of a meta-page. The remaining data field is encoded using the standard \texttt{Generic}-derived \texttt{Binary} instance of a \texttt{ConcurrentMeta} record, and contains the following data. No further optimizations were made to the binary format.
+
+\begin{itemize}
+    \item The transaction id of the most recent commited transaction
+    \item The number of pages in both the data file and the index file
+    \item A pointer to the root of the main tree, along with its height.
+    \item Pointers to the roots of the free trees of both the data file and the index file, along with their heights.
+    \item A pointer to the root of the overflow tree.
+    \item Two collections of page IDs, one for the data file and one for the index file, that are immediately ready for reuse by the next transaction.
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\begin{bytefield}{32}
+  \bitheader{0-31} \\
+  \bitbox{32}{Checksum} \\
+  \bitbox{8}{Type = \hex{0x20}}\bitbox[lrt]{24}{} \\
+  \wordbox[lrb]{3}{\texttt{ConcurrentMeta}}
+\end{bytefield}
+\caption{Binary format of a meta page, the binary format of the \texttt{ConcurrentMeta} record is not optimized.}
+\label{packet:meta-page}
+\end{figure}
+
+\subsection{Overflow pages}\label{sec:binary-format-overflow-pages}
+An overflow page is used to store data that is too big to store in a leaf node. Figure~\ref{packet:overflow-page} shows the binary format of an overflow page. The remaining data field is simply the encoded version of the value using its user-provided \texttt{Binary} instance.
+
+\begin{figure}[H]
+\centering
+\begin{bytefield}{32}
+  \bitheader{0-31} \\
+  \bitbox{32}{Checksum} \\
+  \bitbox{8}{Type = \hex{0x40}}\bitbox[lrt]{24}{} \\
+  \wordbox[lrb]{3}{Value}
+\end{bytefield}
+\caption{Binary format of an overflow page, the value field is simply the encoded version of the value using its user-provided \texttt{Binary} instance.}
+\label{packet:overflow-page}
+\end{figure}
+
+\subsection{Leaf nodes}\label{sec:binary-format-leaf-nodes}
+A leaf node contains actual key-value pairs or key-overflow pairs. Figure~\ref{packet:leaf-node-page} shows the binary format of a leaf node page. It contains a 3-byte value $N$ indicating the number of key-value pairs. The (key, value) tuple is encoded using its \texttt{Binary}-instance, but the value is preceded by a byte indicating whether or not it is an overflow value, as shown in Figure~\ref{packet:non-overflow-value} and~\ref{packet:overflow-value}.
+
+The 3-byte $N$ value means that we need at least 3-byte keys to get $2^{24} - 1$ unique keys. An extra byte to encode the overflow information, means every leaf entry requires at least 4 bytes to fill up the 3-byte counter. This sets an upper bound on the page size of $2^{24} \times 4\, \textrm{bytes} = 67\, \textrm{MB}$, which is deemed plenty.
+
+\begin{figure}[H]
+\centering
+\begin{bytefield}{32}
+  \bitheader{0-31} \\
+  \bitbox{32}{Checksum} \\
+  \bitbox{8}{Type = \hex{0x60}}\bitbox{24}{$N$} \\
+
+  \wordbox[lrt]{1}{$N$ (key, value/overflow) tuples} \\
+  \skippedwords \\
+  \wordbox[lrb]{1}{}
+\end{bytefield}
+\caption{Binary format of a leaf node page.}
+\label{packet:leaf-node-page}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{bytefield}{32}
+  \bitheader{0-31} \\
+  \bitbox{8}{Overflow = \hex{0x0}}
+  \bitbox{24}{\texttt{Binary}-encoded value}
+\end{bytefield}
+\caption{Binary format of a non-overflow value.}
+\label{packet:non-overflow-value}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{bytefield}{40}
+  \bitheader{0-39} \\
+  \bitbox{8}{Overflow = \hex{0x1}}
+  \bitbox{32}{32-bit overflow counter}
+\end{bytefield}
+\caption{Binary format of an overflow value.}
+\label{packet:overflow-value}
+\end{figure}
+
+\subsection{Index nodes}\label{sec:binary-format-index-nodes}
+An index node contains key-page pairs. Figure~\ref{packet:index-node-page} shows the binary format of an index node page. It contains a byte indicating the height of the branch node, and a 3-byte $N$ value indicating the amount of keys in the index node.
+
+The 3-byte $N$ value means that we need at least 3-byte keys to get $2^{24} - 1$ unique keys, along with $2^{24}$ 8-byte page IDs. This sets an upper bound on the page size of $2^{24} \times 11\,\textrm{bytes} = 180\,\textrm{MB}$, which is deemed plenty.
+
+The 1-byte height value, means the maximum amount of leaf nodes is $2^{255}$, which is also plentiful.
+
+\begin{figure}[H]
+\centering
+\begin{bytefield}{32}
+  \bitheader{0-31} \\
+  \bitbox{32}{Checksum} \\
+  \bitbox{8}{Type = \hex{0x80}}\bitbox{8}{Height}\bitbox{16}{$N$ (MSB)} \\
+  \bitbox{8}{$N$ (LSB)}\bitbox[lrt]{24}{} \\
+  \wordbox[lr]{1}{$N$ keys} \\
+  \skippedwords \\
+  \wordbox[lrb]{1}{} \\
+  \wordbox[lrt]{1}{$(N + 1)$ 8-byte page IDs} \\
+  \skippedwords \\
+  \wordbox[lrb]{1}{}
+\end{bytefield}
+\caption{Binary format of an index node page.}
+\label{packet:index-node-page}
+\end{figure}
+\end{document}
+
