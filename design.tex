@@ -16,7 +16,7 @@
 \newcommand{\hex}{\texttt}
 
 \section{Binary format}
-This section describes the on-disk binary format. Figure~\ref{packet:generic-page} shows the binary format of a generic page. The binary format of each page type starts with the Adler-32 checksum of all the data after the checksum field. It is followed by a field that indicates the page type. The binary format of the remaining data is page type specific. The type field can be one of the following values:
+This section describes the on-disk binary format. Figure~\ref{packet:generic-page} shows the binary format of a generic page. The binary format of each page type starts with the xxHash 64-bit checksum\footnote{Seeded with a zero word.} of all the data after the checksum field. It is followed by a field that indicates the page type. The binary format of the remaining data is page type specific. The type field can be one of the following values:
 
 \begin{itemize}
     \item \textbf{Empty (\hex{0x00}):} An empty, unused page. The remaining data is garbage.
@@ -30,7 +30,8 @@ This section describes the on-disk binary format. Figure~\ref{packet:generic-pag
 \centering
 \begin{bytefield}{32}
   \bitheader{0-31} \\
-  \bitbox{32}{Checksum} \\
+  \bitbox[lrt]{32}{Checksum (BE)} \\
+  \bitbox[lrb]{32}{} \\
   \bitbox{8}{Type}\bitbox[lrt]{24}{} \\
   \wordbox[lrb]{3}{Remaining data}
 \end{bytefield}
@@ -38,13 +39,14 @@ This section describes the on-disk binary format. Figure~\ref{packet:generic-pag
 \label{packet:generic-page}
 \end{figure}
 
-The remaining data in Figure~\ref{packet:generic-page} can be compressed using lz4. In that case Figure~\ref{packet:generic-compressed-page} shows the binary format of a generic packet. The first field is the Adler-32 checksum of all (partially compressed) data after the checksum field. The type field indicates the page type, which is \texttt{OR}ed with \hex{0x01} to indicate that the page contents are compressed. The data is compressed using the \texttt{lz4} library.
+The remaining data in Figure~\ref{packet:generic-page} can be compressed using lz4. In that case Figure~\ref{packet:generic-compressed-page} shows the binary format of a generic packet. The first field is the xxHash 64-bit checksum\footnote{Seeded with the zero word.} of all (partially compressed) data after the checksum field. The type field indicates the page type, which is \texttt{OR}ed with \hex{0x01} to indicate that the page contents are compressed. The data is compressed using the \texttt{lz4} library.
 
 \begin{figure}[H]
 \centering
 \begin{bytefield}{32}
   \bitheader{0-31} \\
-  \bitbox{32}{Checksum} \\
+  \bitbox[lrt]{32}{Checksum (BE)} \\
+  \bitbox[lrb]{32}{} \\
   \bitbox{8}{Type \texttt{OR} \hex{0x1}}\bitbox[lrt]{24}{} \\
   \wordbox[lrb]{3}{Compressed remaining data}
 \end{bytefield}
@@ -69,7 +71,8 @@ A meta-page is used to store meta-data about the database. Figure~\ref{packet:me
 \centering
 \begin{bytefield}{32}
   \bitheader{0-31} \\
-  \bitbox{32}{Checksum} \\
+  \bitbox[lrt]{32}{Checksum (BE)} \\
+  \bitbox[lrb]{32}{} \\
   \bitbox{8}{Type = \hex{0x20}}\bitbox[lrt]{24}{} \\
   \wordbox[lrb]{3}{\texttt{ConcurrentMeta}}
 \end{bytefield}
@@ -84,7 +87,8 @@ An overflow page is used to store data that is too big to store in a leaf node. 
 \centering
 \begin{bytefield}{32}
   \bitheader{0-31} \\
-  \bitbox{32}{Checksum} \\
+  \bitbox[lrt]{32}{Checksum (BE)} \\
+  \bitbox[lrb]{32}{} \\
   \bitbox{8}{Type = \hex{0x40}}\bitbox[lrt]{24}{} \\
   \wordbox[lrb]{3}{Value}
 \end{bytefield}
@@ -101,8 +105,9 @@ The 3-byte $N$ value means that we need at least 3-byte keys to get $2^{24} - 1$
 \centering
 \begin{bytefield}{32}
   \bitheader{0-31} \\
-  \bitbox{32}{Checksum} \\
-  \bitbox{8}{Type = \hex{0x60}}\bitbox{24}{$N$} \\
+  \bitbox[lrt]{32}{Checksum (BE)} \\
+  \bitbox[lrb]{32}{} \\
+  \bitbox{8}{Type = \hex{0x60}}\bitbox{24}{$N$ (BE)} \\
 
   \wordbox[lrt]{1}{$N$ (key, value/overflow) tuples} \\
   \skippedwords \\
@@ -145,7 +150,8 @@ The 1-byte height value, means the maximum amount of leaf nodes is $2^{255}$, wh
 \centering
 \begin{bytefield}{32}
   \bitheader{0-31} \\
-  \bitbox{32}{Checksum} \\
+  \bitbox[lrt]{32}{Checksum (BE)} \\
+  \bitbox[lrb]{32}{} \\
   \bitbox{8}{Type = \hex{0x80}}\bitbox{8}{Height}\bitbox{16}{$N$ (MSB)} \\
   \bitbox{8}{$N$ (LSB)}\bitbox[lrt]{24}{} \\
   \wordbox[lr]{1}{$N$ keys} \\
@@ -159,4 +165,3 @@ The 1-byte height value, means the maximum amount of leaf nodes is $2^{255}$, wh
 \label{packet:index-node-page}
 \end{figure}
 \end{document}
-
